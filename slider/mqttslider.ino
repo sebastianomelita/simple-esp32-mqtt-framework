@@ -405,28 +405,28 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 	// se sono completi non succede nulla di anomalo in uanto la SPA potrebbe ignorare i feedback a pulsanti non implementati
 	if(signal[SGNSLD1]){	
 		signal[SGNSLD1] = false;
-		ledcWrite(LEDCHANNEL1, target[OUT1]);
+		ledcWrite(LEDCHANNEL1, map(target[OUT1],0,100,0,255));
 		Serial.print("SLD1: ");
 		Serial.println(target[OUT1]);
 		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr1\":\""+target[OUT1]+"\"}");
 	}
 	if(signal[SGNSLD2]){		
 		signal[SGNSLD2] = false;
-		ledcWrite(LEDCHANNEL2, target[OUT2]);
+		ledcWrite(LEDCHANNEL2, map(target[OUT2],0,100,0,255));
 		Serial.print("SLD2: ");
 		Serial.println(target[OUT2]);
 		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr2\":\""+target[OUT2]+"\"}");
 	}
 	if(signal[SGNSLD3]){	
 		signal[SGNSLD3] = false;
-		ledcWrite(LEDCHANNEL3, target[OUT1]);
+		ledcWrite(LEDCHANNEL3, map(target[OUT3],0,100,0,255));
 		Serial.print("SLD3: ");
 		Serial.println(target[OUT3]);
 		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr3\":\""+target[OUT3]+"\"}");
 	}
 	if(signal[SGNSLD4]){		
 		signal[SGNSLD4] = false;
-		ledcWrite(LEDCHANNEL4, target[OUT4]);
+		ledcWrite(LEDCHANNEL4, map(target[OUT4],0,100,0,255));
 		Serial.print("SLD4: ");
 		Serial.println(target[OUT4]);
 		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr4\":\""+target[OUT4]+"\"}");
