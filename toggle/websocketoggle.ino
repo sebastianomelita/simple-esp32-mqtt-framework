@@ -32,7 +32,8 @@ int outval[NOUT];
 int countr[NOUT];
 long t[NOUT];
 unsigned long tstep[NOUT];
-long target[NOUT];
+long target_p[NOUT];
+long target_t[NOUT];
 long targetbis[NOUT];
 long midtarget[NOUT];
 int direct[NOUT];
@@ -63,13 +64,15 @@ enum signals // segnali tra timer callbacks e loop() (flags)
 
 uint8_t stato[NSTATES];
 bool signal[NSGN];
-const char ssid[] = "xyz";
-const char pass[] = "xxxx";
-const char mqttserver[] = "brokermio";
+const char ssid[] = "xxxxx";
+const char pass[] = "yyyyyy";
+//const char ssid[] = "WebPocket-E280";
+//const char pass[] = "dorabino.7468!";
+const char mqttserver[] = "broker.hivemq.com";
 const int mqttport = 1883;
-const char intopic[] = "casa/in"; 
-const char outtopic[] = "casa/out"; 
-const char mqttid[] = "casa-gruppo01"; 
+const char intopic[] = "soggiorno/in"; 
+const char outtopic[] = "soggiorno/out"; 
+const char mqttid[] = "soggiorno-gruppo05"; 
 
 //WiFiClientSecure net;
 WiFiClient wifi;
@@ -80,7 +83,7 @@ byte count = 0;
 
 //char* out[2]={"\"on\"", "\"off\""};
 //////// 	GESTIONE DELLE FUNZIONI DEI COMANDI REMOTI     ///////////////////////////////////////////////////////////////////
-// json command parser: ricerca un certo commando all’interno di una stringa e ne restituisce il valore
+// json command parser: ricerca un certo commando allï¿½interno di una stringa e ne restituisce il valore
 bool cmdParser(String &outstr, String instr, String attributo, unsigned maxlen){
 	int start, ends=0;
 		
@@ -88,30 +91,29 @@ bool cmdParser(String &outstr, String instr, String attributo, unsigned maxlen){
 
 	if(start >= 0){
 		start += (attributo).length() + 4;
-		//scorri l'input finchè non trovi il tag di fine oppure il fine stringa
+		//scorri l'input finchï¿½ non trovi il tag di fine oppure il fine stringa
 		for(ends=start+1; (ends < start + maxlen) && instr.charAt(ends)!='"' && ends < instr.length(); ends++);
 		outstr = instr.substring(start, ends);
 	}
 	return (start >= 0);
+}
+/ gestore comandi singolo slider (logica senza stato)
+void remoteSlider(uint8_t targetval, uint8_t sgnsld, uint8_t n){
+	stop[n] = false;
+	target_p[n] = targetval;
+	targetbis[n] = targetval;
+	signal[sgnsld] = true;
 }
 
 // gestore comandi singolo pulsante toggle, calcola lo stato del pulsante toggle
 void remoteToggle(uint8_t targetval, uint8_t sttgl, uint8_t sgntgl, uint8_t n){
 	if(targetval == 255){
 		signal[sgntgl] = true;
-		stop[n] = true;   // normalmente è alternativo allo scivolamento per cui lo blocca
+		stop[n] = true;   // normalmente ï¿½ alternativo allo scivolamento per cui lo blocca
 		stato[sttgl] = !stato[sttgl];		
 	}
 }
 /*
-// gestore comandi singolo slider (logica senza stato)
-void remoteSlider(uint8_t targetval, uint8_t sgnsld, uint8_t n){
-	stop[n] = false;
-	target[n] = targetval;
-	targetbis[n] = targetval;
-	signal[sgnsld] = true;
-}
-
 // gestore comandi coppia di pulsanti on/off o up/down (gestisce anche un'eventuale slider associato alla coppia)
 // calcola lo stato dei due pulsanti 
 void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnbtna, uint8_t sgnsld, uint8_t n, uint8_t mult=1){
@@ -121,7 +123,7 @@ void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnb
 		signal[sgnbtna] = true;
 		if(stop[n]){
 			stop[n] = false;
-			target[n] = targetval*mult;
+			target_p[n] = targetval*mult;
 			targetbis[n] = targetval;
 			stato[stbtna] = 255;
 		}else{
@@ -136,7 +138,7 @@ void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnb
 			stato[stbtnb] = LOW;
 		}else{
 			stop[n] = false;
-			target[n] = targetval;
+			target_p[n] = targetval;
 			targetbis[n] = targetval;
 			signal[sgnsld] = true;
 		}
@@ -145,18 +147,18 @@ void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnb
 
 void sweep(uint8_t n) {
 	float half = tstep[n] / 2;
-	if(stop[n]==false && (direct[n]>0 && t[n] < (target[n]-half) || direct[n]<0 && t[n] >= (target[n]+half))){
+	if(stop[n]==false && (direct[n]>0 && t[n] < (target_t[n]-half) || direct[n]<0 && t[n] >= (target_t[n]+half))){
 		t[n]=t[n]+direct[n]*tstep[n];
 		Serial.println("t:"+t[n]);
-		Serial.print("target+:");
-		Serial.println(target[n]+half);
-		Serial.print("target-:");
-		Serial.println(target[n]-half);
+		Serial.print("target_t+:");
+		Serial.println(target_t[n]+half);
+		Serial.print("target_t-:");
+		Serial.println(target_t[n]-half);
 		outval[n] = (float) t[n]/maxt[n]*100;
 		countr[n] = (float) t[n]/tstep[n];
 		sweepAction(outval,countr,n);
 		Serial.println("++++++++++++++");
-		Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
+		Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target_t[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
 	}else{
 		sweepTimer[n].detach();
 		direct[n]=0;
@@ -164,15 +166,15 @@ void sweep(uint8_t n) {
 		signal[SGNBTNRST1+n] = true;
 	}
 }
-// il target si fornisce in percentuale intera di 100 (ad es. 80)
+// il target_t si fornisce in percentuale intera di 100 (ad es. 80)
 void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short n) {
 	nstep[n]=nsteps;
 	maxt[n]=tmax;
 	tstep[n] = (float) tmax/nstep[n]; //durata di uno step
 	if(tstep[n] > 0){
-		target[n] = (float) target[n]/100*tmax;	
+		target_t[n] = (float) target_p[n]/100*tmax;	
 		if(!stop[n]){
-			if(target[n] >= t[n]){
+			if(target_t[n] >= t[n]){
 				direct[n] = 1;
 			}else{
 				direct[n] = -1;
@@ -180,15 +182,15 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 			if(t[n]<=0)t[n]=1;
 			if(t[n]>0){
 				//tstep[n]=tmax/nstep[n]; //durata di uno step
-				Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target0: "+String(target[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
+				Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target_t0: "+String(target_t[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
 				sweepTimer[n].detach();
 				//sweepAction(n);
 				sweepTimer[n].attach_ms<uint8_t>(tstep[n], sweep, n);
 			};
 		}
 	}else{
-		t[n] = target[n];
-		if(target[n] > 0){
+		//t[n] = target[n];
+		if(target_t[n] > 0){
 			direct[n] = 1;
 		}else{
 			direct[n] = -1;
@@ -196,8 +198,8 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 		//direct[n]=0;
 		Serial.println("Special sweep");
 		Serial.println(direct[n]);
-		outval[n] = target[n];
-		countr[n] = (float) (target[n] + 1) / 100 * nstep[n];
+		outval[n] = target_p[n];
+		countr[n] = (float) (target_p[n] + 1) / 100 * nstep[n];
 		sweepAction(outval,countr,n);
 		stop[n]=true;
 	}
@@ -223,7 +225,7 @@ void remoteCntrlInit() {
 		countr[i] = 0;
 		t[i] = 0;
 		tstep[i] = 0;
-		target[i] = 0;
+		target_p[i] = 0;
 		targetbis[i] = 0;
 		direct[i] = 0;
 		stop[i] = true; // lo scivolamento deve essere sbloccato da un tasto o da un cursore
@@ -366,7 +368,7 @@ void messageReceived(String &topic, String &payload) {
 /////    GESTORE EVENTI (callback)    /////////////////////////////////////////////////////////////////////////////////
 void remoteCntrlEventsParser(){  // va dentro il loop()
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// Più SPA posono comandare uno stesso dispositivo
+	// Piï¿½ SPA posono comandare uno stesso dispositivo
 	// lo stato dei pulsanti viene calcolato sul dispositivo ed inviato alle SPA 
 	// lo stato di un pulsante viene inviato alle SPA come feedback 
 	// immediatamente dopo la ricezione di un camando su quel pulsante
@@ -422,4 +424,3 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 	}
 }
 ////   FINE CALLBACKS UTENTE   ////////////////////////////////////////////////////////////////////////////////////////////////
-
