@@ -33,7 +33,7 @@ int countr[NOUT];
 long t[NOUT];
 unsigned long tstep[NOUT];
 long target_p[NOUT];
-long target_t[NOUT];
+long target_tt[NOUT];
 long targetbis[NOUT];
 long midtarget[NOUT];
 int direct[NOUT];
@@ -64,10 +64,10 @@ enum signals // segnali tra timer callbacks e loop() (flags)
 
 uint8_t stato[NSTATES];
 bool signal[NSGN];
-const char ssid[] = "xxxxx";
-const char pass[] = "yyyyyy";
-//const char ssid[] = "WebPocket-E280";
-//const char pass[] = "dorabino.7468!";
+//&const char ssid[] = "AndroidAP1";
+//const char pass[] = "pippo2503";
+const char ssid[] = "xxx";
+const char pass[] = "yyyy";
 const char mqttserver[] = "broker.hivemq.com";
 const int mqttport = 1883;
 const char intopic[] = "soggiorno/in"; 
@@ -97,7 +97,7 @@ bool cmdParser(String &outstr, String instr, String attributo, unsigned maxlen){
 	}
 	return (start >= 0);
 }
-/ gestore comandi singolo slider (logica senza stato)
+// gestore comandi singolo slider (logica senza stato)
 void remoteSlider(uint8_t targetval, uint8_t sgnsld, uint8_t n){
 	stop[n] = false;
 	target_p[n] = targetval;
@@ -147,18 +147,18 @@ void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnb
 
 void sweep(uint8_t n) {
 	float half = tstep[n] / 2;
-	if(stop[n]==false && (direct[n]>0 && t[n] < (target_t[n]-half) || direct[n]<0 && t[n] >= (target_t[n]+half))){
+	if(stop[n]==false && (direct[n]>0 && t[n] < (target_tt[n]-half) || direct[n]<0 && t[n] >= (target_tt[n]+half))){
 		t[n]=t[n]+direct[n]*tstep[n];
 		Serial.println("t:"+t[n]);
-		Serial.print("target_t+:");
-		Serial.println(target_t[n]+half);
-		Serial.print("target_t-:");
-		Serial.println(target_t[n]-half);
+		Serial.print("target_tt+:");
+		Serial.println(target_tt[n]+half);
+		Serial.print("target_tt-:");
+		Serial.println(target_tt[n]-half);
 		outval[n] = (float) t[n]/maxt[n]*100;
 		countr[n] = (float) t[n]/tstep[n];
 		sweepAction(outval,countr,n);
 		Serial.println("++++++++++++++");
-		Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target_t[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
+		Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target_tt[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
 	}else{
 		sweepTimer[n].detach();
 		direct[n]=0;
@@ -166,15 +166,15 @@ void sweep(uint8_t n) {
 		signal[SGNBTNRST1+n] = true;
 	}
 }
-// il target_t si fornisce in percentuale intera di 100 (ad es. 80)
+// il target_tt si fornisce in percentuale intera di 100 (ad es. 80)
 void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short n) {
 	nstep[n]=nsteps;
 	maxt[n]=tmax;
 	tstep[n] = (float) tmax/nstep[n]; //durata di uno step
 	if(tstep[n] > 0){
-		target_t[n] = (float) target_p[n]/100*tmax;	
+		target_tt[n] = (float) target_p[n]/100*tmax;	
 		if(!stop[n]){
-			if(target_t[n] >= t[n]){
+			if(target_tt[n] >= t[n]){
 				direct[n] = 1;
 			}else{
 				direct[n] = -1;
@@ -182,7 +182,7 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 			if(t[n]<=0)t[n]=1;
 			if(t[n]>0){
 				//tstep[n]=tmax/nstep[n]; //durata di uno step
-				Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target_t0: "+String(target_t[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
+				Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target_t0: "+String(target_tt[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
 				sweepTimer[n].detach();
 				//sweepAction(n);
 				sweepTimer[n].attach_ms<uint8_t>(tstep[n], sweep, n);
@@ -190,7 +190,7 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 		}
 	}else{
 		//t[n] = target[n];
-		if(target_t[n] > 0){
+		if(target_tt[n] > 0){
 			direct[n] = 1;
 		}else{
 			direct[n] = -1;
@@ -365,6 +365,12 @@ void messageReceived(String &topic, String &payload) {
 		}
 	//}
 }
+
+String getToggleFeedback(uint8_t toggleState, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"to"+String(n+1)+"\":\""+String(toggleState)+"\"}";
+	//Serial.println("Str: " + str);
+	return str;
+}
 /////    GESTORE EVENTI (callback)    /////////////////////////////////////////////////////////////////////////////////
 void remoteCntrlEventsParser(){  // va dentro il loop()
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -392,35 +398,35 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 		digitalWrite(LED1,stato[STTGL1]);
 		Serial.print("TOGL1: ");
 		Serial.println(stato[STTGL1]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to1\":\""+stato[STTGL1]+"\"}");
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL1], OUT1));
 	}
 	if(signal[SGNTGL2]){		
 		signal[SGNTGL2] = false;
 		digitalWrite(LED1,stato[STTGL2]);
 		Serial.print("TOGL1: ");
 		Serial.println(stato[STTGL2]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to2\":\""+stato[STTGL2]+"\"}");
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL2], OUT2));
 	}
 	if(signal[SGNTGL3]){	
 		signal[SGNTGL3] = false;
 		digitalWrite(LED3,stato[STTGL3]);
 		Serial.print("TOGL3: ");
 		Serial.println(stato[STTGL3]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to3\":\""+stato[STTGL3]+"\"}");
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL3], OUT3));
 	}
 	if(signal[SGNTGL4]){		
 		signal[SGNTGL4] = false;
 		digitalWrite(LED4,stato[STTGL4]);
 		Serial.print("TOGL4: ");
 		Serial.println(stato[STTGL4]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to4\":\""+stato[STTGL4]+"\"}");
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL4], OUT4));
 	}
 	if(signal[SGNINIT]){
 		signal[SGNINIT] = false;
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to1\":\""+stato[STTGL1]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to2\":\""+stato[STTGL2]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to3\":\""+stato[STTGL3]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"to4\":\""+stato[STTGL4]+"\"}");
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL1], OUT1));
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL2], OUT2));
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL3], OUT3));
+		mqttClient.publish(outtopic, getToggleFeedback(stato[STTGL4], OUT4));
 	}
 }
 ////   FINE CALLBACKS UTENTE   ////////////////////////////////////////////////////////////////////////////////////////////////
