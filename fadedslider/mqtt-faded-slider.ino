@@ -51,6 +51,7 @@ int outval[NOUT];
 int countr[NOUT];
 long t[NOUT];
 unsigned long tstep[NOUT];
+unsigned long prec_t[NOUT];
 long target_p[NOUT];
 long target_tt[NOUT];
 long targetbis[NOUT];
@@ -83,8 +84,8 @@ enum signals // segnali tra timer callbacks e loop() (flags)
 
 uint8_t stato[NSTATES];
 bool signal[NSGN];
-const char ssid[] = "xxxxxxxxxxxxx";
-const char pass[] = "yyyyyyyyy";
+const char ssid[] = "xxxxx";
+const char pass[] = "yyyyy";
 //const char ssid[] = "AndroidAP1";
 //const char pass[] = "pippo2503";
 const char mqttserver[] = "broker.hivemq.com";
@@ -168,28 +169,34 @@ void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnb
 void sweep(uint8_t n) {
 	float half = tstep[n] / 2;
 	if(stop[n]==false && (direct[n]>0 && t[n] < (target_tt[n]-half) || direct[n]<0 && t[n] >= (target_tt[n]+half))){
-		t[n]=t[n]+direct[n]*tstep[n];
-		Serial.println("t:"+t[n]);
-		Serial.print("target_tt+:");
-		Serial.println(target_tt[n]+half);
-		Serial.print("target_tt-:");
-		Serial.println(target_tt[n]-half);
+		//t[n]=t[n]+direct[n]*tstep[n];
+		unsigned long tnow = millis();
+		t[n]=t[n]+direct[n]*(tnow-prec_t[n]);
+		prec_t[n] = tnow; 
+		//Serial.println("t:"+t[n]);
+		//Serial.print("target_tt+:");
+		//Serial.println(target_tt[n]+half);
+		//Serial.print("target_tt-:");
+		//Serial.println(target_tt[n]-half);
 		outval[n] = (float) t[n]/maxt[n]*100;
 		countr[n] = (float) t[n]/tstep[n];
 		sweepAction(outval,countr,n);
-		Serial.println("++++++++++++++");
-		Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target_tt[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
+		//Serial.println("++++++++++++++");
+		//Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target_tt[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
 	}else{
 		sweepTimer[n].detach();
+		Serial.println("STOP WWEEP");
 		direct[n]=0;
 		stop[n]=true;
 		signal[SGNBTNRST1+n] = true;
 	}
+	sleep(0);
 }
 // il target_tt si fornisce in percentuale intera di 100 (ad es. 80)
 void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short n) {
 	nstep[n]=nsteps;
 	maxt[n]=tmax;
+	prec_t[n]=millis();
 	tstep[n] = (float) tmax/nstep[n]; //durata di uno step
 	if(tstep[n] > 0){
 		target_tt[n] = (float) target_p[n]/100*tmax;	
@@ -201,10 +208,11 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 			}
 			if(t[n]<=0)t[n]=1;
 			if(t[n]>0){
-				//tstep[n]=tmax/nstep[n]; //durata di uno step
+				tstep[n]=tmax/nstep[n]; //durata di uno step
 				Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target_t0: "+String(target_tt[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
 				sweepTimer[n].detach();
 				//sweepAction(n);
+				Serial.println("START SWEEP");
 				sweepTimer[n].attach_ms<uint8_t>(tstep[n], sweep, n);
 			};
 		}
@@ -223,6 +231,7 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 		sweepAction(outval,countr,n);
 		stop[n]=true;
 	}
+	Serial.println("NEXT TO START");
 };
 // codifica stop/start e direzione della barra per la SPA
 int webdir(uint8_t n) {
@@ -361,6 +370,31 @@ void sweepAction(int outr[], int cr[], byte n){
 	Serial.println("Out " + String(n) + " - " +  String(cr[n]));
 	ledcWrite(n, cr[n]);
 };
+String getToggleFeedback(uint8_t toggleState, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"to"+String(n+1)+"\":\""+String(toggleState)+"\"}";
+	//Serial.println("Str: " + str);
+	return str;
+}
+String getSliderFeedback(uint8_t target, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"pr"+String(n+1)+"\":\""+String(target)+"\"}";
+	//Serial.println("Str: " + str);
+	return str;
+}
+String getFadedSliderActionFeedback(long targetp, short dir, long t, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"pr"+String(n+1)+"\":\""+String(targetp)+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getFadedSliderSweepStopFeedback(short dir, long t, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getFadedSliderSweepInitFeedback(long t, short dir, unsigned long maxt, unsigned nstep, uint8_t n){
+	String str =  "{\"devid\":\""+String(mqttid)+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\", \"sp"+String(n+1)+"\":\""+maxt+"\",\"nl"+String(n+1)+"\":\""+nstep+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
 /////// gestore messaggi MQTT in ricezione (callback)     
 void messageReceived(String &topic, String &payload) {
 	Serial.println("incoming: " + topic + " - " + payload);
@@ -424,55 +458,55 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 		Serial.print("SLD1: ");
 		Serial.println(countr[OUT1]);
 		startSweep(NLEVEL1,0,maxt[OUT1],OUT1);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr1\":\""+target_p[OUT1]+"\",\"dr1\":\""+webdir(OUT1)+"\",\"tr1\":\""+t[OUT1]+"\"}");
+		mqttClient.publish(outtopic,getFadedSliderActionFeedback(target_p[OUT1], webdir(OUT1), t[OUT1], OUT1));
 	}
 	if(signal[SGNSLD2]){		
 		signal[SGNSLD2] = false;
 		Serial.print("SLD2: ");
 		Serial.println(countr[OUT2]);
 		startSweep(NLEVEL2,0,maxt[OUT2],OUT2);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr2\":\""+target_p[OUT2]+"\",\"dr2\":\""+webdir(OUT2)+"\",\"tr2\":\""+t[OUT2]+"\"}");
+		mqttClient.publish(outtopic,getFadedSliderActionFeedback(target_p[OUT2], webdir(OUT2), t[OUT2], OUT2));
 	}
 	if(signal[SGNSLD3]){	
 		signal[SGNSLD3] = false;
 		Serial.print("SLD3: ");
 		Serial.println(countr[OUT3]);
 		startSweep(NLEVEL3,0,maxt[OUT3],OUT3);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr3\":\""+target_p[OUT3]+"\",\"dr3\":\""+webdir(OUT3)+"\",\"tr3\":\""+t[OUT3]+"\"}");
+		mqttClient.publish(outtopic,getFadedSliderActionFeedback(target_p[OUT3], webdir(OUT3), t[OUT3], OUT3));
 	}
 	if(signal[SGNSLD4]){		
 		signal[SGNSLD4] = false;
 		Serial.print("SLD4: ");
 		Serial.println(countr[OUT4]);
 		startSweep(NLEVEL4,0,maxt[OUT4],OUT4);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"pr4\":\""+target_p[OUT4]+"\",\"dr4\":\""+webdir(OUT4)+"\",\"tr4\":\""+t[OUT4]+"\"}");
+		mqttClient.publish(outtopic,getFadedSliderActionFeedback(target_p[OUT4], webdir(OUT4), t[OUT4], OUT4));
 	}
 	if(signal[SGNBTNRST1]){
 		signal[SGNBTNRST1] = false;
 		Serial.print("SGNBTNRST1: ");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"dr1\":\""+webdir(OUT1)+"\",\"tr1\":\""+t[OUT1]+"\"}");
+		mqttClient.publish(outtopic, getFadedSliderSweepStopFeedback(webdir(OUT1), t[OUT1], OUT1));
 	}
 	if(signal[SGNBTNRST2]){
 		signal[SGNBTNRST2] = false;
 		Serial.print("SGNBTNRST2: ");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"dr2\":\""+webdir(OUT2)+"\",\"tr2\":\""+t[OUT2]+"\"}");
+		mqttClient.publish(outtopic, getFadedSliderSweepStopFeedback(webdir(OUT2), t[OUT2], OUT2));
 	}
 	if(signal[SGNBTNRST3]){
 		signal[SGNBTNRST3] = false;
 		Serial.print("SGNBTNRST3: ");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"dr3\":\""+webdir(OUT3)+"\",\"tr3\":\""+t[OUT3]+"\"}");
+		mqttClient.publish(outtopic, getFadedSliderSweepStopFeedback(webdir(OUT3), t[OUT3], OUT3));
 	}
 	if(signal[SGNBTNRST4]){
 		signal[SGNBTNRST4] = false;
 		Serial.print("SGNBTNRST4: ");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"dr4\":\""+webdir(OUT4)+"\",\"tr4\":\""+t[OUT4]+"\"}");
+		mqttClient.publish(outtopic, getFadedSliderSweepStopFeedback(webdir(OUT4), t[OUT4], OUT4));
 	}
 	if(signal[SGNINIT]){
 		signal[SGNINIT] = false;
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"sp1\":\""+maxt[OUT1]+"\",\"dr1\":\""+webdir(OUT1)+"\",\"nl1\":\""+nstep[OUT1]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"sp2\":\""+maxt[OUT2]+"\",\"dr2\":\""+webdir(OUT2)+"\",\"nl2\":\""+nstep[OUT2]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"sp3\":\""+maxt[OUT3]+"\",\"dr3\":\""+webdir(OUT3)+"\",\"nl3\":\""+nstep[OUT3]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"sp4\":\""+maxt[OUT4]+"\",\"dr4\":\""+webdir(OUT4)+"\",\"nl4\":\""+nstep[OUT4]+"\"}");
+		mqttClient.publish(outtopic, getFadedSliderSweepInitFeedback(t[OUT1], webdir(OUT1), maxt[OUT1], nstep[OUT1], OUT1));
+		mqttClient.publish(outtopic, getFadedSliderSweepInitFeedback(t[OUT2], webdir(OUT2), maxt[OUT2], nstep[OUT2], OUT2));
+		mqttClient.publish(outtopic, getFadedSliderSweepInitFeedback(t[OUT3], webdir(OUT3), maxt[OUT3], nstep[OUT3], OUT3));
+		mqttClient.publish(outtopic, getFadedSliderSweepInitFeedback(t[OUT4], webdir(OUT4), maxt[OUT4], nstep[OUT4], OUT4));
 	}
 }
 ////   FINE CALLBACKS UTENTE   ////////////////////////////////////////////////////////////////////////////////////////////////
