@@ -15,6 +15,8 @@
 #define NLEVEL5		100
 #define MAXLEN		20
 #define STATEPERIOD 60000
+#define SHARPNESS1	20
+#define SHARPNESS2	2
 
 Ticker mqttReconnectTimer;
 Ticker wifiReconnectTimer;
@@ -38,12 +40,14 @@ int outval[NOUT];
 int countr[NOUT];
 long t[NOUT];
 unsigned long tstep[NOUT];
+unsigned long prec_t[NOUT];
 long target_p[NOUT];
 long target_tt[NOUT];
 long targetbis[NOUT];
 long midtarget[NOUT];
 int direct[NOUT];
 int stop[NOUT];
+uint8_t sharp[NOUT];
 
 /************** DEFINIZIONE STATI **************************/
 enum btnstates // stato pulsanti 
@@ -84,8 +88,8 @@ enum signals // segnali tra timer callbacks e loop() (flags)
 
 uint8_t stato[NSTATES];
 bool signal[NSGN];
-const char ssid[] = "xxxxxxxxxxxxx";
-const char pass[] = "yyyyyyyyy";
+const char ssid[] = "xxxx";
+const char pass[] = "yyyy";
 const char mqttserver[] = "broker.hivemq.com";
 const int mqttport = 1883;
 const char intopic[] = "soggiorno/in"; 
@@ -165,30 +169,36 @@ void remoteCntrl(uint8_t targetval, uint8_t stbtna, uint8_t stbtnb, uint8_t sgnb
 }
 
 void sweep(uint8_t n) {
-	float half = tstep[n] / 2;
+	float half = tstep[n] / sharp[n];
 	if(stop[n]==false && (direct[n]>0 && t[n] < (target_tt[n]-half) || direct[n]<0 && t[n] >= (target_tt[n]+half))){
-		t[n]=t[n]+direct[n]*tstep[n];
-		Serial.println("t:"+t[n]);
-		Serial.print("target_tt+:");
-		Serial.println(target_tt[n]+half);
-		Serial.print("target_tt-:");
-		Serial.println(target_tt[n]-half);
+		//t[n]=t[n]+direct[n]*tstep[n];
+		unsigned long tnow = millis();
+		t[n]=t[n]+direct[n]*(tnow-prec_t[n]);
+		prec_t[n] = tnow; 
+		//Serial.println("t:"+t[n]);
+		//Serial.print("target_tt+:");
+		//Serial.println(target_tt[n]+half);
+		//Serial.print("target_tt-:");
+		//Serial.println(target_tt[n]-half);
 		outval[n] = (float) t[n]/maxt[n]*100;
 		countr[n] = (float) t[n]/tstep[n];
 		sweepAction(outval,countr,n);
-		Serial.println("++++++++++++++");
+		//Serial.println("++++++++++++++");
 		//Serial.println((String) "t:"+t[n]+" pr.value:"+outval[n]+" stop: "+String(stop[n])+" dir:"+direct[n]+" target:"+target_tt[n]+" tmax:"+maxt[n]+" tstep:"+tstep[n]+" n:"+n+" countr:"+countr[n]);
 	}else{
 		sweepTimer[n].detach();
+		Serial.println("STOP WWEEP");
 		direct[n]=0;
 		stop[n]=true;
 		signal[SGNBTNRST1+n] = true;
 	}
+	sleep(0);
 }
 // il target_tt si fornisce in percentuale intera di 100 (ad es. 80)
 void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short n) {
 	nstep[n]=nsteps;
 	maxt[n]=tmax;
+	prec_t[n]=millis();
 	tstep[n] = (float) tmax/nstep[n]; //durata di uno step
 	if(tstep[n] > 0){
 		target_tt[n] = (float) target_p[n]/100*tmax;	
@@ -200,10 +210,11 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 			}
 			if(t[n]<=0)t[n]=1;
 			if(t[n]>0){
-				//tstep[n]=tmax/nstep[n]; //durata di uno step
-				//Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target_t0: "+String(target_tt[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
+				tstep[n]=tmax/nstep[n]; //durata di uno step
+				Serial.println((String) "tstep0: "+tstep[n]+" stop0: "+String(stop[n])+" target_t0: "+String(target_tt[n])+" maxt0: "+maxt[n]+" dir0: "+direct[n]+" tnow0: "+t[n]+" nstep0: "+nstep[n]+" n0: "+n);
 				sweepTimer[n].detach();
 				//sweepAction(n);
+				Serial.println("START SWEEP");
 				sweepTimer[n].attach_ms<uint8_t>(tstep[n], sweep, n);
 			};
 		}
@@ -222,6 +233,7 @@ void startSweep(unsigned nsteps,unsigned delay,unsigned long tmax,unsigned short
 		sweepAction(outval,countr,n);
 		stop[n]=true;
 	}
+	Serial.println("NEXT TO START");
 };
 // codifica stop/start e direzione della barra per la SPA
 int webdir(uint8_t n) {
@@ -249,6 +261,7 @@ void remoteCntrlInit() {
 		targetbis[i] = 0;
 		direct[i] = 0;
 		stop[i] = true; // lo scivolamento deve essere sbloccato da un tasto o da un cursore
+		sharp[i] = 2;
 	}
 }
 /////// FINE FUNZIONI DI GESTIONE DEI COMANDI REMOTI   /////////////////////////////////////////////////////////////
@@ -328,6 +341,7 @@ typedef enum {
 ////  FINE GESTIONE WIFI E MQTT  //////////////////////////////////////////////////////////////////////////////////
 void setup() {
 	remoteCntrlInit();
+	sharp[OUT1]=sharp[OUT3]=SHARPNESS1;
 	pinMode(LEDSOGGIORNO1, OUTPUT);
 	pinMode(LEDSOGGIORNO2, OUTPUT);
 	Serial.begin(115200);
@@ -361,6 +375,56 @@ void loop() {
 			signal[SGNINIT] = true;
 		}
 	}
+}
+String getToggleFeedback(uint8_t toggleState, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"to"+String(n+1)+"\":\""+String(toggleState)+"\"}";
+	//Serial.println("Str: " + str);
+	return str;
+}
+String getSliderFeedback(uint8_t target, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"pr"+String(n+1)+"\":\""+String(target)+"\"}";
+	//Serial.println("Str: " + str);
+	return str;
+}
+String getFadedSliderActionFeedback(long targetp, short dir, long t, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"pr"+String(n+1)+"\":\""+String(targetp)+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getFadedSliderSweepStopFeedback(short dir, long t, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getFadedSliderSweepInitFeedback(long t, short dir, unsigned long maxt, unsigned nstep, uint8_t n){
+	String str =  "{\"devid\":\""+String(mqttid)+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\", \"sp"+String(n+1)+"\":\""+maxt+"\",\"nl"+String(n+1)+"\":\""+nstep+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getDimmeredToggleFeedback(uint8_t on, uint8_t off, uint8_t to, long t, short dir, unsigned nstep, unsigned long maxt, uint8_t n){
+	String str =  "{\"devid\":\""+String(mqttid)+"\",\"on"+String(n+1)+"\":\""+on+"\",\"off"+String(n+1)+"\":\""+off+"\",\"to"+String(n+1)+"\":\""+to+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"nl"+String(n+1)+"\":\""+nstep+"\", \"sp"+String(n+1)+"\":\""+maxt+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getOnOffFeedback(uint8_t on, uint8_t off, long t, short dir, unsigned long maxt, uint8_t n){
+	String str =  "{\"devid\":\""+String(mqttid)+"\",\"on"+String(n+1)+"\":\""+on+"\",\"off"+String(n+1)+"\":\""+off+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\", \"sp"+String(n+1)+"\":\""+maxt+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getOnOffFeedback2(uint8_t on, uint8_t off, long t, short dir, uint8_t n){
+	String str =  "{\"devid\":\""+String(mqttid)+"\",\"on"+String(n+1)+"\":\""+on+"\",\"off"+String(n+1)+"\":\""+off+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
+}
+String getSliderFeedback2(uint8_t target, uint8_t n){
+	String str = "{\"devid\":\""+String(mqttid)+"\",\"sld"+String(n+1)+"\":\""+String(target)+"\"}";
+	//Serial.println("Str: " + str);
+	return str;
+}
+String getDimmeredToggleInitFeedback(uint8_t on, uint8_t off, uint8_t to, short dir, unsigned nstep, unsigned long maxt, long t,uint8_t n){
+	String str =  "{\"devid\":\""+String(mqttid)+"\",\"on"+String(n+1)+"\":\""+on+"\",\"off"+String(n+1)+"\":\""+off+"\",\"to"+String(n+1)+"\":\""+to+"\",\"dr"+String(n+1)+"\":\""+String(dir)+"\",\"nl"+String(n+1)+"\":\""+nstep+"\", \"sp"+String(n+1)+"\":\""+maxt+"\",\"tr"+String(n+1)+"\":\""+String(t)+"\"}";
+	Serial.println("Str: " + str);
+	return str;
 }
 /// INIZIO CALLBACKS UTENTE  /////////////////////////////////////////////////////////////////////////////////////
 /// CALCOLO USCITE DELLA FUNZIONE DI SCIVOLAMENTO (callback) 
@@ -463,14 +527,14 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 			stop[OUT3] = false;
 			if(stato[STTGL1]){
 				target_p[OUT3] = targetbis[OUT3]; // 3) memorizzo il valore temporale in percentuale OK
-				/*Serial.print("targetbis: ");
+				Serial.print("targetbis: ");
 				Serial.println(targetbis[OUT3]);
 				Serial.print("maxt3: ");
 				Serial.println(maxt[OUT3]);
 				Serial.print("maxt1: ");
 				Serial.println(maxt[OUT1]);
 				Serial.print("target: ");
-				Serial.println(target_p[OUT3]);*/
+				Serial.println(target_p[OUT3]);
 				startSweep(NLEVEL3,0,maxt[OUT3],OUT3);
 			}else{
 				target_p[OUT3] = 0;
@@ -480,8 +544,8 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 			}
 			//digitalWrite(LEDSOGGIORNO1, stato[BTN1]);
 			Serial.print("TOGL1: ");
-			Serial.println(stato[STTGL1]);
-			mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on1\":\""+(stato[STTGL1]*targetbis[OUT3])+"\",\"off1\":\""+(stato[STTGL1]*targetbis[OUT3]*0)+"\",\"to1\":\""+stato[STTGL1]+"\",\"sp1\":\""+maxt[OUT3]+"\",\"dr1\":\""+webdir(OUT3)+"\",\"tr1\":\""+t[OUT3]+"\"}");
+			Serial.println(stato[STTGL1]);			
+			mqttClient.publish(outtopic, getDimmeredToggleFeedback(stato[STTGL1]*targetbis[OUT3],stato[STTGL1]*targetbis[OUT3]*0,stato[STTGL1],t[OUT3],webdir(OUT3),nstep[OUT3],maxt[OUT3],OUT1));
 		}
 	}
 	if(signal[SGNTGL2]){		
@@ -507,7 +571,7 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 			}
 			Serial.print("TOGL2: ");
 			Serial.println(stato[STTGL2]);
-			mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on2\":\""+(stato[STTGL2]*targetbis[OUT5])+"\",\"off2\":\""+(stato[STTGL2]*targetbis[OUT3]*0)+"\",\"to2\":\""+stato[STTGL2]+"\",\"sp2\":\""+maxt[OUT5]+"\",\"dr2\":\""+webdir(OUT5)+"\",\"tr2\":\""+t[OUT5]+"\"}");
+			mqttClient.publish(outtopic, getDimmeredToggleFeedback(stato[STTGL2]*targetbis[OUT3],stato[STTGL2]*targetbis[OUT5]*0,stato[STTGL2],t[OUT5],webdir(OUT5),nstep[OUT3],maxt[OUT5],OUT2));
 		}
 	}
 	if(signal[SGNBTN1] || signal[SGNBTN2]){
@@ -517,7 +581,7 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 		Serial.print("BTN1: ");
 		Serial.println(stato[STBTN1]);
 		Serial.println(stato[STBTN2]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on1\":\""+stato[STBTN1]+"\",\"off1\":\""+stato[STBTN2]+"\",\"sp1\":\""+maxt[OUT1]+"\",\"dr1\":\""+webdir(OUT1)+"\",\"tr1\":\""+t[OUT1]+"\"}");
+		mqttClient.publish(outtopic, getOnOffFeedback(stato[STBTN1],stato[STBTN2],t[OUT1],webdir(OUT1),maxt[OUT1], OUT1));
 	}
 	if(signal[SGNBTN3] || signal[SGNBTN4]){
 		signal[SGNBTN3] = false;
@@ -526,7 +590,7 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 		Serial.print("BTN3: ");
 		Serial.println(stato[STBTN3]);
 		Serial.println(stato[STBTN4]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on2\":\""+stato[STBTN3]+"\",\"off2\":\""+stato[STBTN4]+"\",\"sp2\":\""+maxt[OUT2]+"\",\"dr2\":\""+webdir(OUT2)+"\",\"tr2\":\""+t[OUT2]+"\"}");
+		mqttClient.publish(outtopic, getOnOffFeedback(stato[STBTN3],stato[STBTN4],t[OUT2],webdir(OUT2),maxt[OUT2], OUT2));
 	}
 	if(signal[SGNSLD1]){ 
 		signal[SGNSLD1] = false;
@@ -536,7 +600,7 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 			maxt[OUT3] = (float) target_p[OUT4]/100*maxt[OUT1]; // 1) target slider ---> max sweep toggle OK
 			Serial.print("maxt[OUT3]: ");
 			Serial.println(maxt[OUT3]);
-			mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"sld1\":\""+target_p[OUT4]+"\"}");
+			mqttClient.publish(outtopic, getSliderFeedback2(target_p[OUT4], OUT1));
 		}
 	}
 	if(signal[SGNSLD2]){ 
@@ -547,7 +611,7 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 			maxt[OUT5] = (float) target_p[OUT6]/100*maxt[OUT2]; // 1) target slider ---> max sweep toggle OK
 			Serial.print("maxt[OUT5]: ");
 			Serial.println(maxt[OUT5]);
-			mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"sld2\":\""+target_p[OUT6]+"\"}");
+			mqttClient.publish(outtopic, getSliderFeedback2(target_p[OUT6], OUT2));
 		}
 	}
 	if(signal[SGNBTNRST1]){
@@ -557,7 +621,7 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 		targetbis[OUT3] = (float) t[OUT1]/maxt[OUT1]*100; // 2) memorizzo il valore temporale in percentuale OK
 		Serial.print("targetbis[OUT3]: ");
 		Serial.println(targetbis[OUT3]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on1\":\""+stato[STBTN1]+"\",\"off1\":\""+stato[STBTN2]+"\",\"dr1\":\""+webdir(OUT1)+"\",\"tr1\":\""+t[OUT1]+"\"}");
+		mqttClient.publish(outtopic, getOnOffFeedback2(stato[STBTN1],stato[STBTN2],t[OUT1],webdir(OUT1), OUT1));
 	}
 	if(signal[SGNBTNRST2]){
 		signal[SGNBTNRST2] = false;
@@ -566,27 +630,27 @@ void remoteCntrlEventsParser(){  // va dentro il loop()
 		targetbis[OUT5] = (float) t[OUT2]/maxt[OUT2]*100; // 2) memorizzo il valore temporale in percentuale OK
 		Serial.print("targetbis[OUT5]: ");
 		Serial.println(targetbis[OUT5]);
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on2\":\""+stato[STBTN3]+"\",\"off2\":\""+stato[STBTN4]+"\",\"dr2\":\""+webdir(OUT2)+"\",\"tr2\":\""+t[OUT2]+"\"}");
+		mqttClient.publish(outtopic, getOnOffFeedback2(stato[STBTN3],stato[STBTN4],t[OUT2],webdir(OUT2), OUT2));
 	}
 	if(signal[SGNBTNRST3]){
 		signal[SGNBTNRST3] = false;
 		stato[STBTN3] = LOW;
 		stato[STBTN4] = LOW;
 		//stato[STTGL2] = 1; //setta il toggle
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on1\":\""+stato[STBTN1]+"\",\"off1\":\""+stato[STBTN2]+"\",\"dr1\":\""+webdir(OUT3)+"\",\"tr1\":\""+t[OUT3]+"\"}");
+		mqttClient.publish(outtopic, getOnOffFeedback2(stato[STBTN1],stato[STBTN2],t[OUT3],webdir(OUT3), OUT1));
 	}
 	if(signal[SGNBTNRST5]){
 		signal[SGNBTNRST5] = false;
 		stato[STBTN3] = LOW;
 		stato[STBTN4] = LOW;
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on2\":\""+stato[STBTN3]+"\",\"off2\":\""+stato[STBTN4]+"\",\"dr2\":\""+webdir(OUT5)+"\",\"tr2\":\""+t[OUT5]+"\"}");
+		mqttClient.publish(outtopic, getOnOffFeedback2(stato[STBTN3],stato[STBTN4],t[OUT5],webdir(OUT5), OUT2));
 	}
 	if(signal[SGNINIT]){
 		signal[SGNINIT] = false;
 		stato[STBTN1] = LOW;
 		stato[STBTN2] = LOW;
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on1\":\""+stato[STBTN1]+"\",\"off1\":\""+stato[STBTN2]+"\",\"sp1\":\""+maxt[OUT1]+"\",\"dr1\":\""+webdir(OUT1)+"\",\"nl1\":\""+nstep[OUT1]+"\"}");
-		mqttClient.publish(outtopic, (String) "{\"devid\":\""+mqttid+"\",\"on2\":\""+stato[STBTN3]+"\",\"off2\":\""+stato[STBTN4]+"\",\"sp2\":\""+maxt[OUT2]+"\",\"dr2\":\""+webdir(OUT2)+"\",\"nl2\":\""+nstep[OUT2]+"\"}");
+		mqttClient.publish(outtopic, getDimmeredToggleFeedback(stato[STTGL1]*targetbis[OUT3],stato[STTGL1]*targetbis[OUT3]*0,stato[STTGL1],t[OUT3],webdir(OUT3),nstep[OUT3],maxt[OUT3],OUT1));
+		mqttClient.publish(outtopic, getDimmeredToggleFeedback(stato[STTGL2]*targetbis[OUT3],stato[STTGL2]*targetbis[OUT5]*0,stato[STTGL2],t[OUT5],webdir(OUT5),nstep[OUT3],maxt[OUT5],OUT2));
 	}
 }
 ////   FINE CALLBACKS UTENTE   ////////////////////////////////////////////////////////////////////////////////////////////////
